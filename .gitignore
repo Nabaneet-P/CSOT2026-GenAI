@@ -1,1 +1,3 @@
 residual_dir/
+.env
+.venv/
