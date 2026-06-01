@@ -1,3 +1,4 @@
 residual_dir/
 .env
 .venv/
+.vscode/
