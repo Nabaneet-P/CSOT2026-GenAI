@@ -29,7 +29,10 @@ def run_chatbot():
             continue
         if user_input == "/tokens":
             if (last_response):
-                print(last_response.usage)
+                print("\nToken Usage:")
+                print(f"Prompt Tokens: {last_response.usage.prompt_tokens}")
+                print(f"Completion Tokens: {last_response.usage.completion_tokens}")
+                print(f"Total Tokens: {last_response.usage.total_tokens}\n")
             else:
                 print("\nNo usage history\n")
             continue
