@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class ChatAgent:
-    def __init__(self, model = "openrouter/free"):
+    def __init__(self, model = "openrouter/free", buffer_limit = 4):
         self.client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ["OPENROUTER_API_KEY"],
@@ -13,6 +13,7 @@ class ChatAgent:
         self.model = model
         self.messages = [{"role": "system", "content": "You are a helpful assistant."}]
         self.last_response = None
+        self.buffer_limit = buffer_limit
     
     def call_model(self):
         response = self.client.chat.completions.create(
@@ -36,6 +37,23 @@ class ChatAgent:
         self.last_response = None
         print("\nChat history reset\n")
 
+    def manage_buffer(self):
+        max_limit = self.buffer_limit*2
+        chat = self.messages[1:]
+        if len(chat) <= max_limit:
+            return
+        overflow_count = len(chat) - max_limit
+        to_remove = chat[:overflow_count]
+        self.messages = [self.messages[0]] + chat[overflow_count:]
+
+        print("Buffer limit exceeded")
+        original_chat = self.messages.copy()
+        summary_instructions = {"role": "system", "content": "Summarize the following conversation"}
+        self.messages = [summary_instructions] + to_remove
+        summary = self.call_model()
+        context = {"role": "system", "content": f"Summary of earlier conversation: {summary}"}
+        self.messages = [original_chat[0], context] + original_chat[1:]
+
     def run_chatbot(self):
         print("Chat started. Type 'exit' or 'quit' to quit.\n")
         while True:
@@ -54,6 +72,7 @@ class ChatAgent:
             response = self.call_model()
             self.messages.append({"role": "assistant", "content": response})
             print(f"\nAssistant: {response}\n")
+            self.manage_buffer()
             
         
 if __name__ == "__main__":
