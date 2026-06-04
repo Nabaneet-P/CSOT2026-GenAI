@@ -76,3 +76,6 @@
  Now I had to work on the buffer management. I created a buffer_limit parameter of the class and initialised it to 4. Now, I planned to take last 4 exchanges. The total length of messages would be greater than 9 for buffer limit to exceed, as there is also the original system message. I created a copy of responses to be retained (system message and last 2N messages) and responses to be summarised. Then I used call_model() on the lattter for summary. I merged the summary(1 element) with the copy of the retained messages.
 
  I tried seeing what would happen if I don't use summarize and created a copy of chatbot.py. I took only the last 2N messages and dropped everything else. The model was faster, since we make an additional call while using summarize. However, an obvious drawback was complete lack of knowledge of whatever happened before 2N turns. 
+
+# Experience:
+ I had a good experience in week-1. I understood the basics of an LLM api call and had fun trying to tweak various parameters and seeing what would happen. I did not add model selection because some models were not working due to traffic probably. I think rest of the checklist is clear. I am interested to know what I can learn and build in the upcoming weeks. 
