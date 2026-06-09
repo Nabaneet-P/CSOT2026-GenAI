@@ -48,6 +48,54 @@ client = OpenAI(
 
 MODEL = "openrouter/free"
 
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": (
+                "Read the contents of a file from disk. "
+                "Call this whenever the user asks about the contents of a file, "
+                "or when you need to read something before writing or summarising."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The file path to read, e.g. 'notes.txt' or 'data/report.md'",
+                    },
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": (
+                "Write content to a file on disk. Creates the file if it does not exist. "
+                "Call this when the user asks you to save, write, or create a file."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The file path to write to, e.g. 'output.txt'",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The text content to write into the file",
+                    },
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+]
+
 SYSTEM_PROMPT = """You are a helpful file assistant with access to the following tools:
 
 - read_file(path: str): reads a file from disk and returns its content
@@ -215,20 +263,25 @@ def run_agent(user_message: str) -> str:
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
+            tools=tools,
         )
-        assistant_text = response.choices[0].message.content or ""
-        messages.append({"role": "assistant", "content": assistant_text})
-        if not assistant_text:
-            messages.append({"role": "user", "content": "Your previous response was empty. Please use the <tool_call> format to call a tool, or provide your final answer."})  
+        assistant_text = response.choices[0].message.content
+        tool_calls = response.choices[0].message.tool_calls
+        messages.append(response.choices[0].message)
+
+        if tool_calls:
+            for tool_call in tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+                print(f"Calling tool {function_name} with args {function_args}")
+
+                result = dispatch(function_name, function_args)
+                messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": result})
             continue
-         
-        current_tool = parse_tool_call(assistant_text)
-        if not current_tool: 
+
+        if assistant_text:
             return assistant_text
-        result = dispatch(current_tool["name"], current_tool["arguments"])
-        messages.append({"role": "user", "content": f"<tool_response>\n{result}\n</tool_response>"})
         
-        print(f"\n--- Model Response (Iteration {iteration}) ---\n{assistant_text}\n----------------")
 
     return f"[Agent stopped after {MAX_ITERATIONS} iterations]"
 
