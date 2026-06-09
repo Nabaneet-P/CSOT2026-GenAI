@@ -2,3 +2,5 @@ residual_dir/
 .env
 .venv/
 .vscode/
+sample.txt
+summary.txt

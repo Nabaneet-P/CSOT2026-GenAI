@@ -46,7 +46,7 @@ client = OpenAI(
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
 
-MODEL = "deepseek/deepseek-v4-flash:free"
+MODEL = "openrouter/free"
 
 SYSTEM_PROMPT = """You are a helpful file assistant with access to the following tools:
 
@@ -73,8 +73,17 @@ def read_file(path: str) -> dict:
     Return {"content": ..., "path": ...} on success.
     Return {"error": ...} if the file doesn't exist or can't be read.
     """
-    # TODO: implement using open() in a try/except
-    pass
+
+    try:
+        with open(path, "r") as f:
+            data = f.readlines()
+            content = " ".join(data)
+            return {"path": path, "content": content}
+
+    except FileNotFoundError:
+        return {"error": "File does not exist"}
+    except PermissionError:
+        return {"error": "Cannot access file due to permission error"}
 
 
 def write_file(path: str, content: str) -> dict:
@@ -85,8 +94,15 @@ def write_file(path: str, content: str) -> dict:
 
     Hint: open(path, 'w') and then f.write(content).
     """
-    # TODO: implement
-    pass
+
+    try:
+        with open(path, "w") as f:
+            f.write(content)
+            bytes_written = os.path.getsize(path)
+            return {"success": True, "path": path, "bytes_written": bytes_written}
+        
+    except Exception as e:
+        return {"error": f"Unable to write to path: {e}"}
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +123,18 @@ def parse_tool_call(response_text: str) -> dict | None:
 
     Hint: use re.search() with re.DOTALL to find the block, then json.loads() the body.
     """
-    # TODO: implement
-    pass
+    
+    match = re.search(r"<tool_call>\s*(.*?)\s*</tool_call>", response_text, re.DOTALL)
+    if not match:
+        return None
+    json_body = match.group(1).strip()
+    
+    try:
+        return json.loads(json_body, strict=False)
+    except json.JSONDecodeError as e:
+        print(f"Parser Warning: Model generated invalid JSON: {e}")
+        print(f"Offending text was:\n{json_body}")
+        return None
 
 
 def strip_tool_call(response_text: str) -> str:
@@ -116,8 +142,9 @@ def strip_tool_call(response_text: str) -> str:
     Return the response text with any <tool_call>...</tool_call> block removed.
     Useful for printing the model's prose without the raw tag.
     """
-    # TODO: implement (re.sub is your friend)
-    pass
+    
+    cleaned_text = re.sub(r"<tool_call>.*?</tool_call>","",response_text,flags=re.DOTALL)
+    return cleaned_text.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +166,16 @@ def dispatch(name: str, arguments: dict) -> str:
 
     Always return a string (json.dumps the result dict).
     """
-    # TODO: implement
-    pass
+    
+    if name not in TOOL_REGISTRY:
+        return json.dumps({"error": f"Unknown tool: {name}"})
+    try:
+        func = TOOL_REGISTRY[name]
+        data = func(**arguments)
+        return json.dumps(data)
+    
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +212,23 @@ def run_agent(user_message: str) -> str:
     ]
 
     for iteration in range(MAX_ITERATIONS):
-        # TODO: call the model, parse the response, dispatch or return
-        pass
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+        )
+        assistant_text = response.choices[0].message.content or ""
+        messages.append({"role": "assistant", "content": assistant_text})
+        if not assistant_text:
+            messages.append({"role": "user", "content": "Your previous response was empty. Please use the <tool_call> format to call a tool, or provide your final answer."})  
+            continue
+         
+        current_tool = parse_tool_call(assistant_text)
+        if not current_tool: 
+            return assistant_text
+        result = dispatch(current_tool["name"], current_tool["arguments"])
+        messages.append({"role": "user", "content": f"<tool_response>\n{result}\n</tool_response>"})
+        
+        print(f"\n--- Model Response (Iteration {iteration}) ---\n{assistant_text}\n----------------")
 
     return f"[Agent stopped after {MAX_ITERATIONS} iterations]"
 
