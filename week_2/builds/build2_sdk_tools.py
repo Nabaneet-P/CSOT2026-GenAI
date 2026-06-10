@@ -33,7 +33,7 @@ client = OpenAI(
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
 
-MODEL = "deepseek/deepseek-v4-flash:free"
+MODEL = "openrouter/free"
 
 # ---------------------------------------------------------------------------
 # Tool schemas (the contract between you and the model)
@@ -101,8 +101,7 @@ def get_weather(city: str, unit: str = "celsius") -> dict:
     Return a dict like:
         {"city": city, "temperature": 28, "unit": unit, "condition": "partly cloudy"}
     """
-    # TODO: implement (hardcode some reasonable values)
-    pass
+    return {"city": city, "temperature": 32, "unit": unit, "condition": "Moderately sunny"}
 
 
 def calculate(expression: str) -> dict:
@@ -111,8 +110,12 @@ def calculate(expression: str) -> dict:
     Use eval() with restricted globals so imports and builtins are blocked.
     Return {"result": value} or {"error": message}.
     """
-    # TODO: implement
-    pass
+    restricted_globals = {"__builtins__": None}
+    try:
+        result = eval(expression, restricted_globals)
+        return {"result": result}
+    except Exception as e:
+        return {"error": f"{e}"}
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +140,14 @@ def dispatch(tool_call) -> str:
 
     Note: tool_call.function.arguments is a *string*, not a dict. Parse it first.
     """
-    # TODO: implement
-    pass
+    func_name = tool_call.function.name
+    if func_name not in TOOL_REGISTRY:
+        return json.dumps({"error": "Invalid tool name"})
+    
+    tool = TOOL_REGISTRY[func_name]
+    args = json.loads(tool_call.function.arguments)
+    result = tool(**args)
+    return json.dumps(result)
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +190,18 @@ def run_agent(user_message: str) -> str:
         )
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
+        messages.append(message)
 
-        # TODO: handle finish_reason == "tool_calls"
-        # TODO: handle finish_reason == "stop"
-        pass
+        if finish_reason == "stop":
+            return message.content
+        if finish_reason == "tool_calls":
+            for tool_call in message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+
+                result = dispatch(tool_call)
+                messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
+                print(f"Iteration {_}, Calling {function_name}, args {function_args}")
 
     return f"[Agent stopped after {MAX_ITERATIONS} iterations without a final answer]"
 
