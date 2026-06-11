@@ -38,7 +38,7 @@ client = OpenAI(
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
 
-MODEL = "deepseek/deepseek-v4-flash:free"
+MODEL = "openrouter/free"
 MAX_HISTORY_TURNS = 20   # keep last N user+assistant pairs
 
 # ---------------------------------------------------------------------------
@@ -50,8 +50,11 @@ def call_model(messages: list[dict]) -> str:
     Send the full messages list to the model and return the assistant's reply text.
     This is a blocking call. It must run in a worker thread in the TUI.
     """
-    # TODO: implement using client.chat.completions.create()
-    pass
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+    )
+    return response.choices[0].message.content
 
 
 def trim_history(messages: list[dict], max_turns: int) -> list[dict]:
@@ -62,8 +65,12 @@ def trim_history(messages: list[dict], max_turns: int) -> list[dict]:
     Drop oldest pairs from messages[1:] when over the limit.
     A 'pair' is one user message + one assistant message = 2 entries.
     """
-    # TODO: implement
-    pass
+    limit = 2*max_turns
+    chat = messages[1:]
+    if (len(chat)>limit):
+        messages_new = [messages[0]] + chat[limit:]
+        return messages_new
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +141,7 @@ class ChatApp(App):
         self.messages = trim_history(self.messages, MAX_HISTORY_TURNS)
 
         # Run the API call in a background thread so the UI stays responsive
-        # TODO: call self.run_worker(self._get_response(), thread=True)
-        pass
+        self.run_worker(self._get_response(), thread=True)
 
     async def _get_response(self) -> None:
         """
@@ -150,8 +156,15 @@ class ChatApp(App):
         Handle exceptions: if call_model raises, display an error in the log.
         """
         log = self.query_one("#log", RichLog)
-        # TODO: implement
-        pass
+        
+        try:
+            response = call_model(self.messages)
+            self.messages.append({"role": "assistant", "content": response})
+            self.call_from_thread(log.write, f"[blue][Assistant][/blue] {response}\n")
+
+        except Exception as e:
+            error = f"Error occured: {e}"
+            self.call_from_thread(log.write, error)
 
     # -----------------------------------------------------------------------
     # Actions (bound to keyboard shortcuts)
@@ -159,15 +172,15 @@ class ChatApp(App):
 
     def action_clear_display(self) -> None:
         """Clear the visible log without touching conversation history."""
-        # TODO: implement
-        pass
+        log = self.query_one("#log", RichLog)
+        log.clear()
 
     def action_clear_history(self) -> None:
         """Reset conversation history and clear the display."""
-        # TODO: reset self.messages to just the system message
-        # TODO: clear the display
-        # TODO: write a "History cleared." notice to the log
-        pass
+        self.messages = [self.messages[0]]
+        log = self.query_one("#log", RichLog)
+        log.clear()
+        log.write("Cleared history")
 
 
 # ---------------------------------------------------------------------------
