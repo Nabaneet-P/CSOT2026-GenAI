@@ -4,3 +4,4 @@ residual_dir/
 .vscode/
 sample.txt
 summary.txt
+.alphaxiv_tokens.json
