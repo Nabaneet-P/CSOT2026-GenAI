@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 import asyncio
 from contextlib import AsyncExitStack
 
@@ -67,6 +68,7 @@ class ChatAgent:
             api_key=os.environ["OPENROUTER_API_KEY"],
         )
         self.model = model
+        self.last_response = None
         self.messages = [{
             "role": "system", 
             "content": (
@@ -142,6 +144,8 @@ class ChatAgent:
                 )
             
             response = await asyncio.to_thread(_get_completion)
+            self.last_response = response
+
             message = response.choices[0].message
             finish_reason = response.choices[0].finish_reason
             self.messages.append(message.model_dump(exclude_none=True))
@@ -173,6 +177,16 @@ class ChatAgent:
                         "name": name,
                         "content": output
                     })
+    
+    def write_token_usage(self, log_widget: RichLog) -> None:
+        if self.last_response and hasattr(self.last_response, "usage"):
+            usage = self.last_response.usage
+            log_widget.write("\n[bold yellow] Token Usage Summary [/bold yellow]")
+            log_widget.write(f"[bold] Prompt Tokens:[/bold] {usage.prompt_tokens}")
+            log_widget.write(f"[bold] Completion Tokens:[/bold] {usage.completion_tokens}")
+            log_widget.write(f"[bold magenta] Total Tokens Used:[/bold magenta] {usage.total_tokens}\n")
+        else:
+            log_widget.write("\n[italic red]No API token history compiled for this session yet.[/italic red]\n")
 
 
 class ChatApp(App):
@@ -187,6 +201,8 @@ class ChatApp(App):
         Binding("ctrl+l", "clear_display", "Clear display"),
         Binding("ctrl+k", "clear_history", "Clear history"),
         Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+t", "show_tokens", "Token Usage"),
+        Binding("f2", "export_research", "Export Session"),
     ]
 
     def __init__(self):
@@ -274,7 +290,51 @@ class ChatApp(App):
         except Exception: 
             pass
         self.exit()
+    
+    def _save_research_to_file(self) -> str:
+        if not self.agent.messages or len(self.agent.messages) <= 1:
+            return ""
+        output_dir = "research_history"
+        os.makedirs(output_dir, exist_ok=True)
 
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(output_dir, f"research_{timestamp}.md")
+
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(f"# Research Log\n")
+            f.write(f"Exported: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Model Engine: {self.agent.model}\n\n")
+            f.write("---\n\n")
+
+            for msg in self.agent.messages:
+                role = msg.get("role", "").upper()
+                content = msg.get("content", "")
+                if role == "SYSTEM" or not content:
+                    continue
+                if role == "TOOL":
+                    f.write(f"### Search API/Tool Invoked: \"{msg.get('name')}\"\n")
+                    f.write(f"> **Preview data:** {content[:350]}...\n\n")
+                    continue
+
+                display_name = "User Query" if role == "USER" else "Research Assistant"
+                f.write(f"## {display_name}\n")
+                f.write(f"{content}\n\n")
+                f.write("---\n\n")
+
+        return filename
+    
+    def action_export_research(self) -> None:
+        log = self.query_one("#log", RichLog)
+        try:
+            filename = self._save_research_to_file()
+            if filename:
+                log.write(f"\n[bold green] Export Successful: {filename}[/bold green]\n")
+                self.notify(f" Saved session output to {filename}", title="Session Exported", severity="information")
+            else:
+                log.write("\n[italic yellow] Export Interrupted: No conversation history recorded yet.[/italic yellow]\n")
+        except Exception as e:
+            log.write(f"\n[bold red] Failed to write export file: {e}[/bold red]\n")
+    
     def action_clear_display(self) -> None:
         self.query_one("#log", RichLog).clear()
 
@@ -283,6 +343,10 @@ class ChatApp(App):
         log = self.query_one("#log", RichLog)
         log.clear()
         log.write("[dim gray]Conversation history cleared.[/dim gray]\n")
+
+    def action_show_tokens(self) -> None:
+        log = self.query_one("#log", RichLog)
+        self.agent.write_token_usage(log)
 
 if __name__ == "__main__":
     ChatApp().run()
