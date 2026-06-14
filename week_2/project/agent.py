@@ -196,6 +196,7 @@ class ChatApp(App):
     RichLog { height: 1fr; border: solid $primary; padding: 0 1; }
     Input { dock: bottom; height: 3; }
     """
+    theme = "dracula"
 
     BINDINGS = [
         Binding("ctrl+l", "clear_display", "Clear display"),
@@ -219,7 +220,7 @@ class ChatApp(App):
 
     def on_mount(self) -> None:
         log = self.query_one("#log", RichLog)
-        log.write("[bold yellow]Initializing AlphaXiv Client Engine...[/bold yellow]\n")
+        log.write("[bold blue]Initializing AlphaXiv Client Engine...[/bold blue]")
         self.run_worker(self._initialize_agent())
 
     async def _initialize_agent(self) -> None:
@@ -227,10 +228,10 @@ class ChatApp(App):
         storage = FileTokenStorage()
         tokens = await storage.get_tokens()
         if not tokens or not tokens.access_token:
-            log.write("[bold red]Error: No active login credentials session parsed.[/bold red]\n")
-            log.write("[yellow]Please execute 'ouath.py' on the terminal line first.[/yellow]\n")
+            log.write("[bold red]Error: No active login credentials session parsed.[/bold red]")
+            log.write("[yellow]Please execute 'ouath.py' on the terminal line first.[/yellow]")
             return
-        log.write("[dim gray]Loading stored AlphaXiv credentials...[/dim gray]\n")
+        log.write("[bold green]Loading stored AlphaXiv credentials...[/bold green]")
 
         try:
             headers = {
@@ -259,7 +260,7 @@ class ChatApp(App):
                         "parameters": remote_tool.inputSchema
                     }
                 })
-            log.write("[bold green]Initialization Succeeded! Agent is active.[/bold green]\n")
+            log.write("[bold magenta]Initialization Succeeded! Agent is active.[/bold magenta]\n")
             input_field = self.query_one(Input)
             input_field.disabled = False
             input_field.placeholder = "Type a message and press Enter..."
