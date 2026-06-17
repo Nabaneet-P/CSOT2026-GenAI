@@ -16,44 +16,90 @@ Run twice: save a session in run 1, load it in run 2 and confirm messages restor
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from pathlib import Path
+from datetime import datetime
 
-SESSIONS_DIR = ".agent/sessions"
-AGENTS_PATHS = ("AGENTS.md", ".agent/AGENTS.md")
+SESSIONS_DIR = Path("week_3/.agent/sessions")
+AGENTS_PATHS = (Path("AGENTS.md"), Path("week_3/.agent/AGENTS.md"))
 
 BASE_PROMPT = "You are Research Desk, a helpful research assistant."
 
 
 def create_session() -> str:
     """Return a new 8-char hex session ID."""
-    os.makedirs(SESSIONS_DIR, exist_ok=True)
-    # TODO: initiate a new, empty session with a unique ID
-    pass
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    full_id = uuid.uuid4()
+    id = full_id.hex[:8]
+    file = f"{id}.json"
+    file_path = SESSIONS_DIR / file
 
+    time = datetime.now()
+    formatted_time = time.isoformat(timespec='seconds')
+    json_data = {
+        "id": id,
+        "title": "Untitled",
+        "created_at": formatted_time,
+        "updated_at": formatted_time,
+        "messages": [{"role": "system", "content": build_system_prompt()}],
+    }
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(json_data, f, indent=4)
+    print(f"Session file created at: {file_path}")
+    return id
 
 def save_session(session_id: str, messages: list, title: str = "Untitled") -> None:
     """Write session JSON to .agent/sessions/{id}.json"""
-    # TODO: implement
-    pass
+    time = datetime.now()
+    formatted_time = time.isoformat(timespec='seconds')
+    file = f"{session_id}.json"
+    file_path = SESSIONS_DIR / file
 
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    created = data["created_at"]
+
+    json_data = {
+        "id": session_id,
+        "title": title,
+        "created_at": created,
+        "updated_at": formatted_time,
+        "messages": messages,
+    }
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(json_data, f, indent=4)
 
 def load_session(session_id: str) -> dict:
     """Load and return session dict including messages list."""
-    # TODO: implement
-    pass
-
+    file = f"{session_id}.json"
+    file_path = SESSIONS_DIR / file
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data
 
 def list_sessions() -> list[dict]:
     """Return sessions sorted by updated_at descending."""
-    # TODO: implement
-    pass
-
+    sessions = []
+    for file_path in SESSIONS_DIR.glob("*.json"):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                session = json.load(f)
+                sessions.append({
+                    "id": session["id"],
+                    "title": session["title"],
+                    "updated_at": datetime.fromisoformat(session["updated_at"])
+                })
+        except (json.JSONDecodeError, KeyError):
+            continue
+    sessions.sort(key=lambda x: x["updated_at"], reverse=True)
+    return sessions[:5]
 
 def build_system_prompt() -> str:
     """Base prompt + AGENTS.md if it exists."""
-    # TODO: implement
-    pass
-
+    system_prompt = BASE_PROMPT
+    agent_path = AGENTS_PATHS[1]
+    with open(agent_path, "r", encoding="utf-8") as f:
+        system_prompt += "\n\n" + f.read()
+    return system_prompt
 
 if __name__ == "__main__":
     sid = create_session()
@@ -64,5 +110,4 @@ if __name__ == "__main__":
     ]
     save_session(sid, messages, title="Quantum error correction")
     print(f"Saved session: {sid}")
-    print(f"All sessions: {list_sessions()}")
-    print(f"Loaded: {load_session(sid)['title']}")
+    print(list_sessions())
