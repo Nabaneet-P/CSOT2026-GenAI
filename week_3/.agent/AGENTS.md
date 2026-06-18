@@ -11,12 +11,20 @@
 - If `read_paper` returns 404, fall back to `web_fetch` on arxiv.org/abs/...
 - Do not use web_search when paper_search is the right tool
 
+## Example 
+| Question | Tool |
+|---|---|
+| "What papers exist on RLHF?" | `paper_search` |
+| "Read the FlashAttention paper" | `paper_search` → `read_paper` |
+| "What did OpenAI announce yesterday?" | `web_search` (not papers) |
+| "Paper not on HF — get it from arXiv" | `web_fetch("https://arxiv.org/abs/...")` |
+
 ## Research notes
-- Save new content with `write_file` to `notes/`
+- Save new content with `write_file` to `week_3/notes/`
 - Update existing notes with `read_file` then `edit_file` — do not rewrite whole files unnecessarily
 - Use `edit_file` operations: `append` for new sections, `replace` to revise, `delete` to remove stale parts
-- Keep edits inside `notes/` unless the user explicitly asks otherwise
-- Use lowercase hyphenated filenames: `notes/topic-name.md`
+- Keep edits inside `week_3/notes/` unless the user explicitly asks otherwise
+- Use lowercase hyphenated filenames: `week_3/notes/topic-name.md`
 
 ## Web search
 - Use `web_search` before `web_fetch` for non-paper questions
