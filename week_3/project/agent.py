@@ -149,10 +149,17 @@ def build_system_prompt() -> str:
 
 def main():
     agent = REPLAgent()
-    if len(sys.argv) > 1:
-        print(agent.run_once(" ".join(sys.argv[1:])))
+    args = sys.argv
+    if (len(args) == 1):
+        agent.run()
         return
-    agent.run()
-
+    if (len(args) == 2):
+        if (args[1] == "--tui"):
+            from tui import ResearchDeskApp
+            ResearchDeskApp.run_app()
+            return 
+        REPLAgent.run_once()
+        return
+    
 if __name__ == "__main__":
     main()
