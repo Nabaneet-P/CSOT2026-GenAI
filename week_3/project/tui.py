@@ -28,12 +28,19 @@ class TUIAgent(Agent):
     def _emit(self, event: str, **data) -> None:
         if event == "tool_call":
             tool_name = data.get('name')
-            self.app_log.write(f"[Tool Call] Executing: {tool_name}")
+            log_line = f"[bold blue][Tool Call][/bold blue] [bold red]Executing: {tool_name}[/bold red]"
+            self.app_log.app.call_from_thread(self.app_log.write, log_line)
 
 class ResearchDeskApp(App):
     TITLE = "Research Desk TUI"
-    CSS = """
+    CSS ="""
     Screen { layout: vertical; }
+    #main-container {
+        layout: grid;
+        grid-size: 2;
+        grid-columns: 7fr 3fr;
+        height: 1fr;
+    }
     RichLog { height: 1fr; border: solid $primary; padding: 0 1; }
     Input { dock: bottom; height: 3; }
     """
@@ -53,7 +60,7 @@ class ResearchDeskApp(App):
         yield Header(show_clock=True)
         with Container(id="main-container"):
             yield RichLog(id="chat-log", wrap=True, highlight=True, markup=True)
-            yield RichLog(id="tool-log", wrap=True, highlight=True)
+            yield RichLog(id="tool-log", wrap=True, highlight=True, markup=True)
         yield Input(placeholder="Ask Research Desk anything... (Press Enter)")
         yield Footer()
 
@@ -62,21 +69,38 @@ class ResearchDeskApp(App):
         self.agent = TUIAgent(app_log=tool_log_widget, session_id=self.session_id)
         chat_log = self.query_one("#chat-log", RichLog)
         display_session = self.agent.session_id if self.agent.session_id else "Default"
-        chat_log.write(f"--- Welcome to Research Desk [Session: {display_session}] ---")
+        chat_log.write(f"[bold green]Welcome to Research Desk[/bold green] [bold red][Session: {display_session}][/bold red]")
+
+    def action_clear_display(self) -> None:
+        chat_log = self.query_one("#chat-log", RichLog)
+        tool_log = self.query_one("#tool-log", RichLog)
+        chat_log.clear()
+        tool_log.clear()
+        display_session = self.agent.session_id if self.agent.session_id else "Default"
+        chat_log.write(f"[bold green]Display Cleared.[/bold green] [bold red][Session: {display_session}][/bold red]")
+
+    def action_clear_history(self) -> None:
+        chat_log = self.query_one("#chat-log", RichLog)
+        tool_log = self.query_one("#tool-log", RichLog)
+        base_system_prompt = self.agent.messages[0]
+        self.agent.messages = [base_system_prompt]
+        chat_log.clear()
+        tool_log.clear()
+        chat_log.write("[bold yellow]Conversation history and context memory have been reset[/bold yellow]")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_message = event.value.strip()
         input_widget = event.input
         chat_log = self.query_one("#chat-log", RichLog)
         input_widget.value = ""
-        chat_log.write(f"\n[bold blue]You:[/bold blue] {user_message}")
+        chat_log.write(f"\n[bold cyan][You][/bold cyan] {user_message}")
         input_widget.disabled = True
         self.run_worker(self.process_agent_chat(user_message, chat_log, input_widget), thread=True)
 
     async def process_agent_chat(self, message: str, chat_log: RichLog, input_widget: Input) -> None:
         try:
             answer = self.agent.chat(message)
-            chat_log.write(f"[bold green]Research Desk:[/bold green] {answer}")
+            chat_log.write(f"[bold blue][Research Desk][/bold blue] {answer}")
         except Exception as e:
             chat_log.write(f"[bold red]Error:[/bold red] {str(e)}")
         finally:
