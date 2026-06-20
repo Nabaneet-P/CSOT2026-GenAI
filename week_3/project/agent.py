@@ -17,6 +17,7 @@ import sys
 import uuid
 import tools
 import json
+import argparse
 from datetime import datetime
 from pathlib import Path
 from openai import OpenAI
@@ -32,7 +33,10 @@ MODEL = "openrouter/free"
 
 SESSIONS_DIR = Path("week_3/.agent/sessions")
 AGENTS_PATHS = (Path("AGENTS.md"), Path("week_3/.agent/AGENTS.md"))
-BASE_PROMPT = "You are Research Desk, a helpful research assistant."
+BASE_PROMPT = """You are Research Desk, a helpful research assistant.
+Whenever a user asks you to research a topic, find papers, or look up information, you MUST save your findings by calling the `write_file` or `edit_file` tools to create/update a markdown note file in the `week_3/notes/` directory. 
+Do not just output the research in the chat. Your chat response should be a very brief summary pointing to the file you created (e.g., "I have compiled the research notes on this topic in `week_3/notes/computer-vision-advancements.md`").
+"""
 
 class Agent:
     def __init__(self, workspace: str = ".", session_id: str | None = None):
@@ -82,10 +86,10 @@ class Agent:
         with open(self.file_path, "w", encoding="utf-8") as f:
             json.dump(self.json_data, f, indent=4)
         return answer
-
+    
     def run_once(self, prompt: str) -> str:
         return self.chat(prompt)   
-
+    
     def _run_loop(self) -> str:
         for _ in range(tools.MAX_ITERATIONS):
             response = client.chat.completions.create(
@@ -148,18 +152,26 @@ def build_system_prompt() -> str:
     return system_prompt
 
 def main():
-    agent = REPLAgent()
-    args = sys.argv
-    if (len(args) == 1):
-        agent.run()
+    parser = argparse.ArgumentParser(
+        description="Research Desk: Choose between REPL, TUI, or running a specific session."
+    )
+    parser.add_argument("--tui", action="store_true", help="Launch the TUI interface")
+    parser.add_argument("--session", type=str, metavar="SESSION_ID", help="Specify a session ID")
+    parser.add_argument("command", nargs="?", type=str, help="Optional single command to run once")
+    args = parser.parse_args()
+
+    if args.tui:
+        from tui import ResearchDeskApp
+        ResearchDeskApp.run_app(session_id=args.session)
         return
-    if (len(args) == 2):
-        if (args[1] == "--tui"):
-            from tui import ResearchDeskApp
-            ResearchDeskApp.run_app()
-            return 
-        REPLAgent.run_once()
+    
+    if args.command:
+        agent = Agent(session_id=args.session)
+        agent.run_once(args.command)
         return
+
+    agent = REPLAgent(session_id=args.session)
+    agent.run()
     
 if __name__ == "__main__":
     main()

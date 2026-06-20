@@ -40,11 +40,11 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The path where the file will be saved."
+                        "description": "The target file path relative to workspace root (e.g., 'week_3/notes/topic.md')."
                     },
                     "content": {
                         "type": "string",
-                        "description": "The text content to write into the file."
+                        "description": "The structural text content to write into the file."
                     }
                 },
                 "required": ["path", "content"]
@@ -61,7 +61,7 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The target file path to edit."
+                        "description": "The target file path relative to workspace root to edit."
                     },
                     "operation": {
                         "type": "string",

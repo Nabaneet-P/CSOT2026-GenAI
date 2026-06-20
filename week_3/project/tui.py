@@ -16,6 +16,7 @@ from textual.binding import Binding
 from textual.containers import Container
 from textual.widgets import Header, Footer, Input, Log, RichLog
 from agent import Agent
+from typing import Optional
 
 from contextlib import AsyncExitStack
 
@@ -44,6 +45,10 @@ class ResearchDeskApp(App):
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
+    def __init__(self, session_id: Optional[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.session_id = session_id
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Container(id="main-container"):
@@ -54,9 +59,10 @@ class ResearchDeskApp(App):
 
     def on_mount(self) -> None:
         tool_log_widget = self.query_one("#tool-log", RichLog)
-        self.agent = TUIAgent(app_log=tool_log_widget)
+        self.agent = TUIAgent(app_log=tool_log_widget, session_id=self.session_id)
         chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(f"--- Welcome to Research Desk [Session: {self.agent.session_id}] ---")
+        display_session = self.agent.session_id if self.agent.session_id else "Default"
+        chat_log.write(f"--- Welcome to Research Desk [Session: {display_session}] ---")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         user_message = event.value.strip()
@@ -78,6 +84,6 @@ class ResearchDeskApp(App):
             input_widget.focus()
 
     @classmethod
-    def run_app(cls):
-        app = cls()
+    def run_app(cls, session_id: Optional[str] = None):
+        app = cls(session_id=session_id)
         app.run()
