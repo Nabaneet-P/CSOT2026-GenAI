@@ -25,11 +25,12 @@ def paper_search(query: str, limit: int = 5) -> List[Dict]:
         data = response.json()
         results = []
         for item in data:
-            arxiv_id = item.get("id", "")
+            paper_info = item.get("paper", {})
+            arxiv_id = paper_info.get("id", "")
             results.append({
                 "arxiv_id": arxiv_id,
-                "title": item.get("title", ""),
-                "abstract": item.get("summary", ""),
+                "title": paper_info.get("title", ""),
+                "abstract": paper_info.get("summary", ""),
                 "url": f"{BASE_URL}/papers/{arxiv_id}",
             })
         return results
@@ -38,7 +39,7 @@ def paper_search(query: str, limit: int = 5) -> List[Dict]:
     except Exception as e:
         return [{"error": f"Hugging Face paper search failed: {str(e)}"}]
 
-def read_paper(arxiv_id: str) -> Dict:
+def read_paper(arxiv_id: str, max_content_length: int = 10000) -> Dict:
     url = f"{BASE_URL}/api/papers/{arxiv_id}"
     try:
         response = requests.get(url, timeout=10)
@@ -48,6 +49,8 @@ def read_paper(arxiv_id: str) -> Dict:
         try:
             md_response = requests.get(md_url, timeout=5)
             content = md_response.text if md_response.status_code == 200 else "Content unavailable."
+            if len(content) > max_content_length:
+                    content = content[:max_content_length] + "\n\n...[Truncated]..."
         except Exception:
             content = "Content unavailable due to a network error."
         return {
