@@ -109,6 +109,12 @@ class Agent:
                         "content": "You have remaining uncompleted tasks on your todo tracker list. Resolve them."
                     })
                     continue
+                elif not current_todos:
+                    self.messages.append({
+                        "role": "user",
+                        "content": "You have not initialized your todo tracker list yet. Use the `add_todos` tool to lay out your steps before proceeding."
+                    })
+                    continue
                 return message.content if message.content else ""
                 
             elif finish_reason == "tool_calls" and message.tool_calls:
