@@ -1,11 +1,13 @@
 from .files import write_file, edit_file
 from .exec import run_command
 from .plan import add_todos, get_todos, mark_todo
+from .search import list_definitions  
 
 def approved_file_tool_wrapper(tool_func, name: str):
     def wrapped(*args, **kwargs):
+        target_path = kwargs.get('path') or (args[0] if len(args) > 0 else 'unknown')
         print(f"\nWARNING: The agent wants to execute a mutating file operation [{name}]:")
-        print(f"    Target Path: {kwargs.get('path', 'unknown')}")
+        print(f"    Target Path: {target_path}")
         try:
             approved = input("Allow this file change? [y/N]: ").strip().lower() == "y"
         except (KeyboardInterrupt, EOFError):
@@ -23,6 +25,7 @@ TOOL_REGISTRY = {
     "run_command": run_command, 
     "write_file": approved_file_tool_wrapper(write_file, "write_file"),
     "edit_file": approved_file_tool_wrapper(edit_file, "edit_file"),
+    "list_definitions": list_definitions, 
 }
 
 TOOLS = [
@@ -133,6 +136,20 @@ TOOLS = [
                     "content": {"type": "string"}
                 },
                 "required": ["path", "operation", "start_line"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_definitions",
+            "description": "Parse a Python file with ast and return every function/class it declares, in source order, with line numbers — a structural outline without reading the file's full body.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "The relative file path to analyze (e.g., 'src/auth.py')"}
+                },
+                "required": ["path"]
             }
         }
     }

@@ -61,7 +61,12 @@ def run_command(command: str, cwd: str = WORKSPACE_ROOT, timeout: int = TIMEOUT_
         except (KeyboardInterrupt, EOFError):
             approved = False  
         if not approved:
-            return {"error": "blocked: user did not approve this command"}
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": "blocked: user did not approve this command",
+                "error": "User denied execution"
+            }
         
     try:
         result = subprocess.run(
