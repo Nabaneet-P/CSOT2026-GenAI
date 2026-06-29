@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 import json
+import time
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ client = OpenAI(
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
 MODEL = "openrouter/free"
-MAX_ITERATIONS = 15
+MAX_ITERATIONS = 40
 
 STORAGE_DIR = Path(BASE_DIR) / ".agent"
 SESSIONS_DIR = STORAGE_DIR / "sessions"
@@ -89,15 +90,25 @@ class Agent:
     
     def _run_loop(self) -> str:
         for iteration in range(MAX_ITERATIONS):
+            time.sleep(5)
             current_todos = get_todos()
             if current_todos and all(t["status"] == "completed" for t in current_todos):
                 return f"Task completed successfully! All items resolved in {iteration} steps."
 
-            response = client.chat.completions.create(
-                model=MODEL,
-                messages=self.messages,
-                tools=TOOLS,
-            )
+            try:
+                response = client.chat.completions.create(
+                    model=MODEL,
+                    messages=self.messages,
+                    tools=TOOLS,
+                )
+            except Exception as e:
+                print(f"\n[API Connection Error]: {e}.", file=sys.stderr)
+                continue
+            if not response or not getattr(response, "choices", None) or len(response.choices) == 0:
+                print(f"\n[API Warning]: OpenRouter returned an empty payload. ", file=sys.stderr)
+                time.sleep(5)
+                continue
+
             message = response.choices[0].message
             finish_reason = response.choices[0].finish_reason
             self.messages.append(message.model_dump(exclude_none=True))
@@ -110,9 +121,10 @@ class Agent:
                     })
                     continue
                 elif not current_todos:
+                    print("\n[System]: Agent failed to initialize todos.", file=sys.stderr)
                     self.messages.append({
                         "role": "user",
-                        "content": "You have not initialized your todo tracker list yet. Use the `add_todos` tool to lay out your steps before proceeding."
+                        "content": "CRITICAL: You must call `add_todos` immediately in your next turn to outline your plan. Do not reply with normal text until you do so.",
                     })
                     continue
                 return message.content if message.content else ""
