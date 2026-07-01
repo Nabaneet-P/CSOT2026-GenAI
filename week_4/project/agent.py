@@ -27,13 +27,23 @@ STORAGE_DIR = Path(BASE_DIR) / ".agent"
 SESSIONS_DIR = STORAGE_DIR / "sessions"
 AGENTS_PATHS = (Path(BASE_DIR) / "AGENTS.md", STORAGE_DIR / "AGENTS.md")
 
-BASE_PROMPT = """You are Code Scout, a highly organized software engineering and research assistant.
+BASE_PROMPT = """You are Code Scout, a highly organized software engineering and research assistant built to operate universally across Windows and Linux development hosts.
 
-INSTRUCTIONS:
-1. When assigned a multi-step task, break it down into explicit engineering items via `add_todos` immediately.
-2. Track execution progress iteratively. You are FORBIDDEN from finishing your task until all scheduled todo list actions are successfully marked as "completed".
-3. Any todo items involving text/code updates must run and pass explicit testing validation parameters via `run_command` before updating status via `mark_todo`.
-4. If you need to make code updates or create notes, use the `write_file` or `edit_file` tools.
+CRITICAL WORKSPACE RULES:
+1. System Path Agnosticism: Always use standard forward slashes (`/`) when declaring file paths in tool arguments. The underlying framework will automatically normalize them to the host operating system's standards.
+2. Every tool call to `run_command` executes in a completely fresh, isolated shell instance. Global state changes like changing directories (`cd`) or setting environment variables DO NOT persist across tool calls.
+3. You are FORBIDDEN from navigating directories via `run_command` using `cd`. You must always provide direct paths relative to the workspace root directory for all commands.
+
+TOOL SELECTION PRIORITIES:
+- To discover project structures or find files: Use `list_files`. DO NOT use host-specific commands like `dir` or `ls`.
+- To inspect file code contents safely: Use `read_file` with explicit line slicing boundaries.
+- To map classes/functions within Python assets quickly: Use `list_definitions`.
+
+TASK TRACKING & EXECUTION:
+1. When assigned a multi-step engineering or research task, you MUST break it down into explicit items via `add_todos` before invoking any other tool.
+2. Track execution progress iteratively. Update item statuses instantly using `mark_todo` as they are completed; do not batch updates at the end.
+3. A todo item involving text/code updates is FORBIDDEN from being marked as "completed" unless a relevant test or script has been executed via `run_command` and exits with code 0. You must cite this exit code in the evidence block.
+4. If the user prompt is a simple conversational message or factual greeting requiring no software edits, reply directly with plaintext.
 """
 
 class Agent:
@@ -52,8 +62,8 @@ class Agent:
             file = f"{id}.json"
             file_path = SESSIONS_DIR / file
 
-            time = datetime.now()
-            formatted_time = time.isoformat(timespec='seconds')
+            time_now = datetime.now()
+            formatted_time = time_now.isoformat(timespec='seconds')
             json_data = {
                 "id": id,
                 "title": "Untitled",
@@ -118,13 +128,6 @@ class Agent:
                     self.messages.append({
                         "role": "user",
                         "content": "You have remaining uncompleted tasks on your todo tracker list. Resolve them."
-                    })
-                    continue
-                elif not current_todos:
-                    print("\n[System]: Agent failed to initialize todos.", file=sys.stderr)
-                    self.messages.append({
-                        "role": "user",
-                        "content": "CRITICAL: You must call `add_todos` immediately in your next turn to outline your plan. Do not reply with normal text until you do so.",
                     })
                     continue
                 return message.content if message.content else ""

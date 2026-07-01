@@ -1,4 +1,4 @@
-from .files import write_file, edit_file
+from .files import read_file, write_file, edit_file, list_files
 from .exec import run_command
 from .plan import add_todos, get_todos, mark_todo
 from .search import list_definitions  
@@ -23,6 +23,8 @@ TOOL_REGISTRY = {
     "get_todos": get_todos,
     "mark_todo": mark_todo,
     "run_command": run_command, 
+    "read_file": read_file,
+    "list_files": list_files,
     "write_file": approved_file_tool_wrapper(write_file, "write_file"),
     "edit_file": approved_file_tool_wrapper(edit_file, "edit_file"),
     "list_definitions": list_definitions, 
@@ -148,6 +150,55 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "The relative file path to analyze (e.g., 'src/auth.py')"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "Recursively searches and lists tracked files matching a specific pattern inside a directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The relative directory path to search from. Defaults to current directory '.'",
+                        "default": "."
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "A glob pattern used to filter file matches (e.g., '*.py'). Defaults to '*'.",
+                        "default": "*"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Reads specific lines of content from a file within the workspace safely.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The relative path to the file within the workspace."
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "The starting line number to read (1-indexed). Defaults to 1.",
+                        "default": 1
+                    },
+                    "read_lines": {
+                        "type": "integer",
+                        "description": "The number of lines to read from the start line. Defaults to 200.",
+                        "default": 200
+                    }
                 },
                 "required": ["path"]
             }

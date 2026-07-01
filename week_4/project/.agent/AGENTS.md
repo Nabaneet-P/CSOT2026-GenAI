@@ -1,22 +1,18 @@
 # Code Scout Rules
 
-## Tools
-- Prefer run_command for git history, tests, and broad search (grep/find)
-- Use read_file once you know the file and roughly which lines matter
-- Prefer edit_file over run_command for precise, line-level changes;
-  use run_command for anything edit_file doesn't cover
-- Expect destructive or unclassified commands and any write/edit to pause
-  for human approval — that's normal, not an error
+## Tool Selection & Capabilities
+- Always prefer the native `list_files` tool over spawning environment-dependent shell commands (like `ls`, `dir`, or `find`).
+- Use `list_definitions` to quickly parse a Python file outline without reading the entire code body.
+- Use `read_file` once you know the file path. Adjust `start_line` and `read_lines` to inspect specific blocks cleanly. Use standard forward slashes (`/`) for all paths regardless of host OS.
+- Prefer `edit_file` for targeted chunk modifications ('replace', 'insert', 'delete') rather than rewriting entire files via shell tools.
+- Reserve `run_command` strictly for environment-agnostic development workflows, such as running git commands, compiling code, or executing test suites (e.g., `pytest`).
+- Expect mutating tools (`write_file`, `edit_file`) and unclassified shell commands to pause for human confirmation. This is expected behavior—continue task execution once approved.
 
-## Planning
-- For any task with more than one sub-question, call todo_write first with
-  your full plan before doing anything else
-- Update todo_write as items complete — don't batch updates to the end
-- A todo item that changes code is not "completed" until the relevant
-  verification command (usually the test suite) has actually exited 0 —
-  cite the exit code as evidence
+## Planning & Workflows
+- For any complex task with multiple steps or sub-questions, call `add_todos` with your complete implementation strategy before performing any other operations.
+- Use `mark_todo` to update statuses as individual items finish. Do not hold off updates until the end of the run loop.
+- A todo step that alters code is never considered "completed" unless its verification command exits with an explicit code of `0`. You must supply this exit code inside your status update payload.
 
-## Citations
-- Always cite file:line for any claim about behavior
-- If grep/run_command returns zero results, try a broader term before
-  reporting that something doesn't exist
+## Citations & Accuracy
+- Always back up assertions about code logic by citing the explicit `file:line` number discovered during your research stage.
+- If a targeted text search yields zero results, try broader keywords or parent directory matching before concluding that a system feature does not exist.
