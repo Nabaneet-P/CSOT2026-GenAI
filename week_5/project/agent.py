@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import uuid
 import json
@@ -10,7 +11,7 @@ from typing import Callable, Dict, Any, List
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from tools import run_command, add_todos, get_todos, mark_todo, TOOL_REGISTRY, TOOLS
+from tools import run_command, add_todos, get_todos, mark_todo, TOOL_REGISTRY, TOOLS, ToolApprovalRequired
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
@@ -29,23 +30,17 @@ STORAGE_DIR = Path(BASE_DIR) / ".agent"
 SESSIONS_DIR = STORAGE_DIR / "sessions"
 AGENTS_PATHS = (Path(BASE_DIR) / "AGENTS.md", STORAGE_DIR / "AGENTS.md")
 
-BASE_PROMPT = """You are Code Scout, a highly organized software engineering and research assistant built to operate universally across Windows and Linux development hosts.
+BASE_PROMPT = """You are CodeScout, an advanced, adaptive AI system architecture operating across Windows and Linux development hosts. You possess specialized workspace execution skills that you can dynamically load on demand.
 
 CRITICAL WORKSPACE RULES:
-1. System Path Agnosticism: Always use standard forward slashes (`/`) when declaring file paths in tool arguments. The underlying framework will automatically normalize them to the host operating system's standards.
-2. Every tool call to `run_command` executes in a completely fresh, isolated shell instance. Global state changes like changing directories (`cd`) or setting environment variables DO NOT persist across tool calls.
-3. You are FORBIDDEN from navigating directories via `run_command` using `cd`. You must always provide direct paths relative to the workspace root directory for all commands.
+1. Always use standard forward slashes (`/`) when declaring file paths in tool arguments.
+2. Every tool call to `run_command` executes in a completely fresh, isolated shell instance. Global state changes like `cd` or setting environment variables DO NOT persist.
+3. You are FORBIDDEN from navigating directories via `run_command` using `cd`. Use direct paths relative to the workspace root.
 
-TOOL SELECTION PRIORITIES:
-- To discover project structures or find files: Use `list_files`. DO NOT use host-specific commands like `dir` or `ls`.
-- To inspect file code contents safely: Use `read_file` with explicit line slicing boundaries.
-- To map classes/functions within Python assets quickly: Use `list_definitions`.
-
-TASK TRACKING & EXECUTION:
-1. When assigned a multi-step engineering or research task, you MUST break it down into explicit items via `add_todos` before invoking any other tool. This is mandatory for execution.
-2. Track execution progress iteratively. Update item statuses instantly using `mark_todo` as they are completed; do not batch updates at the end.
-3. A todo item involving text/code updates is FORBIDDEN from being marked as "completed" unless a relevant test or script has been executed via `run_command` and exits with code 0. You must cite this exit code in the evidence block.
-4. If the user prompt is a simple conversational message or factual greeting requiring no software edits, reply directly with plaintext.
+DYNAMIC ROLE & TASK ACTIVATION:
+1. You have access to specialized skills for various tasks. Analyze the user's initial request carefully.
+2. If the user's task requires heavy code editing, engineering, or research workflows, you MUST immediately call `load_skill` to load the appropriate persona runbook before calling any other tool.
+3. If the user prompt is a simple conversational message, factual greeting, or casual chat requiring no deep workspace actions, reply directly in plaintext without loading a skill.
 """
 
 class Agent:
@@ -87,8 +82,41 @@ class Agent:
     def _emit(self, event_type: str, **kwargs):
         self.callback(event_type, kwargs)
 
+    def _load_skills_metadata(self) -> str:
+        skills_dir = Path(BASE_DIR) / "skills"
+        if not skills_dir.exists() or not skills_dir.is_dir():
+            return ""
+        skills_list = []
+        frontmatter_re = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL | re.MULTILINE)
+        for folder in skills_dir.iterdir():
+            if folder.is_dir():
+                skill_file = folder / "SKILL.md"
+                if skill_file.exists():
+                    try:
+                        content = skill_file.read_text(encoding="utf-8")
+                        match = frontmatter_re.match(content)
+                        if match:
+                            yaml_text = match.group(1)
+                            name_match = re.search(r"^name:\s*(.+)$", yaml_text, re.MULTILINE)
+                            desc_match = re.search(r"^description:\s*(?:>)?\s*(.+?)(?=\n\w+:|$)", yaml_text, re.DOTALL | re.MULTILINE)
+                            if name_match and desc_match:
+                                name = name_match.group(1).strip()
+                                desc = desc_match.group(1).replace("\n", " ").strip()
+                                skills_list.append(f"- **{name}**: {desc}")
+                    except Exception:
+                        pass 
+        if not skills_list:
+            return ""
+        return (
+            "\n\nAVAILABLE SYSTEM SKILLS:\n"
+            "If the user task requires any complex workflow listed below, you MUST use the tool "
+            "`load_skill` with the matching skill name to get step-by-step instructions before starting.\n"
+            + "\n".join(skills_list)
+        )
+
     def _build_system_prompt(self) -> str:
         system_prompt = BASE_PROMPT
+        system_prompt += self._load_skills_metadata()
         for agent_path in AGENTS_PATHS:
             if agent_path.exists():
                 with open(agent_path, "r", encoding="utf-8") as f:
@@ -156,7 +184,10 @@ class Agent:
             elif finish_reason == "tool_calls" and getattr(message, "tool_calls", None):
                 for tool_call in message.tool_calls:
                     self._emit("tool_call", name=tool_call.function.name, arguments=tool_call.function.arguments)
-                    result = self.dispatch(tool_call)
+                    try:
+                        result = self.dispatch(tool_call)
+                    except ToolApprovalRequired as approval_event:
+                        result = json.dumps(self._handle_ui_approval(approval_event))
                     self._emit("tool_result", name=tool_call.function.name, result=result)
                     
                     self.messages.append({
@@ -167,6 +198,33 @@ class Agent:
                     
         return f"[Agent terminated: Maximum execution limit ({MAX_ITERATIONS}) reached with items left outstanding]"
 
+    def _handle_ui_approval(self, event) -> dict:
+        approval_container = {"approved": False, "handled": False}
+        self._emit("request_user_approval", 
+                   tool_name=event.tool_name, 
+                   target=event.target,
+                   storage=approval_container)
+        if approval_container["handled"]:
+            if approval_container["approved"]:
+                return event.callback(*event.args, **event.kwargs)
+            return json.dumps({
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"blocked: user denied execution of {event.tool_name}.",
+                "error": "User denied execution"
+            })
+        print(f"\n [Approval Required]: {event.tool_name} requests permission to run:")
+        print(f"    {event.target}")
+        choice = input("Allow execution? [y/N]: ").strip().lower()
+        if choice == "y":
+            return event.callback(*event.args, **event.kwargs)
+        return {
+            "exit_code": 1,
+            "stdout": "",
+            "stderr": "blocked: user did not approve this execution request",
+            "error": "User denied execution"
+        }
+    
     def dispatch(self, tool_call) -> str:
         name = tool_call.function.name
         try:
@@ -179,6 +237,8 @@ class Agent:
         
         try:
             return json.dumps(TOOL_REGISTRY[name](**args))
+        except ToolApprovalRequired:
+            raise
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
         
@@ -195,7 +255,7 @@ class REPLAgent:
             print(f"\n  [Error]: {data['message']}", file=sys.stderr)
 
     def run(self):
-        print(f"Code Scout Engine [{self.agent.session_id}] Active — Enter /quit or /exit to exit.")
+        print(f"CodeScout Engine [{self.agent.session_id}] Active — Enter /quit or /exit to exit.")
         while True:
             try:
                 user_input = input("\n> ").strip()
@@ -208,7 +268,7 @@ class REPLAgent:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Research Desk: Choose between REPL, TUI, or running a specific session."
+        description="CodeScout: Choose between REPL, TUI, or running a specific session."
     )
     parser.add_argument("--tui", action="store_true", help="Launch the TUI interface")
     parser.add_argument("--session", type=str, metavar="SESSION_ID", help="Specify a session ID")
@@ -216,13 +276,13 @@ def main():
     args = parser.parse_args()
 
     if args.tui:
-        from tui import ResearchDeskApp
-        ResearchDeskApp.run_app(session_id=args.session)
+        from tui import CodeScoutApp
+        CodeScoutApp.run_app(session_id=args.session)
         return
     
     if args.command:
         agent = Agent(session_id=args.session)
-        agent.run_once(args.command)
+        agent._run_loop(args.command)
         return
 
     agent = REPLAgent(session_id=args.session)

@@ -2,6 +2,10 @@ from .files import read_file, write_file, edit_file, list_files
 from .exec import run_command
 from .plan import add_todos, get_todos, mark_todo
 from .search import list_definitions  
+from .skill import load_skill
+from .papers import read_paper, paper_search
+from .web import web_fetch, web_search
+from .exceptions import ToolApprovalRequired
 
 def approved_file_tool_wrapper(tool_func, name: str):
     def wrapped(*args, **kwargs):
@@ -28,6 +32,11 @@ TOOL_REGISTRY = {
     "write_file": approved_file_tool_wrapper(write_file, "write_file"),
     "edit_file": approved_file_tool_wrapper(edit_file, "edit_file"),
     "list_definitions": list_definitions, 
+    "load_skill": load_skill,
+    "web_fetch": web_fetch,
+    "web_search": web_search,
+    "read_paper": read_paper,
+    "paper_search": paper_search,
 }
 
 TOOLS = [
@@ -205,3 +214,102 @@ TOOLS = [
         }
     }
 ]
+
+TOOLS.append({
+    "type": "function",
+    "function": {
+        "name": "load_skill",
+        "description": "Loads detailed procedural runbooks or step-by-step instructions for an available system skill.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The exact name identifier of the skill to execute (e.g., 'commit', 'release')."
+                }
+            },
+            "required": ["name"]
+        }
+    }
+})
+
+TOOLS.extend([
+    {
+        "type": "function",
+        "function": {
+            "name": "paper_search",
+            "description": "Searches an academic database for research papers matching a specific text query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The research topic, title, keywords, or query string to search for."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "The maximum number of paper results to return. Defaults to 5.",
+                        "default": 5
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_paper",
+            "description": "Retrieves the full structural details, abstract, metadata, and markdown body content of a specific research paper by its arXiv ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "arxiv_id": {
+                        "type": "string",
+                        "description": "The unique arXiv ID identifier for the target academic paper."
+                    }
+                },
+                "required": ["arxiv_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Executes a traditional organic web search via Serper API to gather top matching live links and text snippets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search term or phrase to query on the web."
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "description": "The exact number of top search results to return. Defaults to 5.",
+                        "default": 5
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": "Downloads and cleans the textual contents of a targeted webpage. Evaluates and prioritizes optimized 'llms.txt' formats if available, fallback parsing via html text stripping.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The explicit target URL protocol path to retrieve text contents from."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    }]
+)

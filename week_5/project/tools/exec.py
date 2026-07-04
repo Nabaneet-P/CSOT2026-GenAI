@@ -2,6 +2,7 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
+from .exceptions import ToolApprovalRequired
 
 WORKSPACE_ROOT = os.path.abspath(os.environ.get("WORKSPACE_ROOT", "."))
 TIMEOUT_DEFAULT = 10
@@ -26,6 +27,8 @@ def paths_within_sandbox(command: str, workspace_root: str) -> bool:
     except ValueError:
         return False
     for token in tokens:
+        if token.startswith("$") or token.startswith("-"):
+            continue
         if '/' in token or '\\' in token or '.' in token:
             try:
                 token_path = Path(token)
@@ -54,28 +57,26 @@ def run_command(command: str, cwd: str = WORKSPACE_ROOT, timeout: int = TIMEOUT_
         return {"error": "blocked: command references a path outside the workspace"}
     classification = classify_command(command)
     if classification != "read_only":
-        try:
-            print("WARNING: the agent wants to run a command that may write, delete, or install:")
-            print("    " + command)
-            approved = input("Allow this command? [y/N]: ").strip().lower() == "y"
-        except (KeyboardInterrupt, EOFError):
-            approved = False  
-        if not approved:
-            return {
-                "exit_code": 1,
-                "stdout": "",
-                "stderr": "blocked: user did not approve this command",
-                "error": "User denied execution"
-            }
-        
+        raise ToolApprovalRequired(
+            tool_name="run_command",
+            target=command, 
+            callback=lambda: _execute_shell_subprocess(command, cwd, timeout),
+            args=(),
+            kwargs={}
+        )
+    return _execute_shell_subprocess(command, cwd, timeout)
+
+def _execute_shell_subprocess(command: str, cwd: str, timeout: int) -> dict:
     try:
+        current_env = os.environ.copy()
         result = subprocess.run(
             command,
             shell=True,
             cwd=cwd,
             timeout=timeout,
             capture_output=True,
-            text=True
+            text=True,
+            env=current_env 
         )
         stdout = result.stdout or ""
         stderr = result.stderr or ""

@@ -1,12 +1,35 @@
+import threading
+from typing import Optional, Dict, Any
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
-from textual.widgets import Header, Footer, Input, RichLog
+from textual.containers import Container, Grid
+from textual.widgets import Header, Footer, Input, RichLog, Label, Button
+from textual.screen import ModalScreen
 from agent import Agent
-from typing import Optional, Dict, Any
 
-class ResearchDeskApp(App):
-    TITLE = "Research Desk TUI"
+class ConfirmModal(ModalScreen[bool]):
+    def __init__(self, title: str, body: str):
+        super().__init__()
+        self.title_text = title
+        self.body_text = body
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(f"[bold yellow]{self.title_text}[/bold yellow]", id="modal-title"),
+            Label(self.body_text, id="modal-body"),
+            Button("Approve", variant="success", id="btn-approve"),
+            Button("Deny", variant="error", id="btn-deny"),
+            id="modal-dialog"
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-approve":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+class CodeScoutApp(App):
+    TITLE = "CodeScout TUI"
     CSS = """
     Screen { layout: vertical; }
     #main-container {
@@ -17,8 +40,37 @@ class ResearchDeskApp(App):
     }
     RichLog { height: 1fr; border: solid $primary; padding: 0 1; }
     Input { dock: bottom; height: 3; }
+
+    ConfirmModal {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.6);
+    }
+    #modal-dialog {
+        layout: grid;
+        grid-size: 2;
+        grid-columns: 1fr 1fr;
+        padding: 1 2;
+        background: $surface;
+        border: thick $primary;
+        width: 65;
+        height: 18;
+    }
+    #modal-title { 
+        column-span: 2; 
+        text-align: center; 
+        margin-bottom: 1; 
+        text-style: bold; 
+        color: $accent;
+    }
+    #modal-body { 
+        column-span: 2; 
+        margin-bottom: 1; 
+        height: 5;
+    }
+    #btn-approve { width: 100%; }
+    #btn-deny { width: 100%; }
     """
-    theme = "dracula"
+    theme = "tokyo-night"
 
     BINDINGS = [
         Binding("ctrl+l", "clear_display", "Clear display"),
@@ -36,7 +88,7 @@ class ResearchDeskApp(App):
         with Container(id="main-container"):
             yield RichLog(id="chat-log", wrap=True, highlight=True, markup=True)
             yield RichLog(id="tool-log", wrap=True, highlight=True, markup=True)
-        yield Input(placeholder="Ask Research Desk anything... (Press Enter)")
+        yield Input(placeholder="Ask CodeScout anything... (Press Enter)")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -46,7 +98,7 @@ class ResearchDeskApp(App):
         )
         chat_log = self.query_one("#chat-log", RichLog)
         display_session = self.agent.session_id if self.agent.session_id else "Default"
-        chat_log.write(f"[bold green]Welcome to Research Desk[/bold green] [bold red][Session: {display_session}][/bold red]")
+        chat_log.write(f"[bold green]Welcome to CodeScout[/bold green] [bold red][Session: {display_session}][/bold red]")
 
     def handle_agent_events(self, event_type: str, data: Dict[str, Any]) -> None:
         tool_log = self.query_one("#tool-log", RichLog)
@@ -62,6 +114,20 @@ class ResearchDeskApp(App):
             err_msg = data.get('message', 'Unknown Error')
             log_line = f"[bold red][Error][/bold red] {err_msg}"
             self.call_from_thread(tool_log.write, log_line)
+        elif event_type == "request_user_approval":
+            evt = threading.Event()
+            self.call_from_thread(lambda: self.run_worker(self.process_ui_approval(data, evt)))
+            evt.wait()
+
+    async def process_ui_approval(self, data: Dict[str, Any], evt: threading.Event) -> None:
+        modal = ConfirmModal(
+            title=f"Security Confirmation: {data['tool_name']}",
+            body=f"The agent is attempting to run:\n\n{data['target']}"
+        )
+        approved = await self.push_screen_wait(modal)
+        data["storage"]["approved"] = bool(approved)
+        data["storage"]["handled"] = True
+        evt.set()
 
     def action_clear_display(self) -> None:
         chat_log = self.query_one("#chat-log", RichLog)
@@ -102,7 +168,7 @@ class ResearchDeskApp(App):
         try:
             if self.agent:
                 answer = self.agent.chat(message)
-                chat_log.write(f"[bold blue][Research Desk][/bold blue] {answer}")
+                chat_log.write(f"[bold blue][CodeScout][/bold blue] {answer}")
         except Exception as e:
             chat_log.write(f"[bold red]Error Processing Request:[/bold red] {str(e)}")
         finally:
@@ -115,4 +181,4 @@ class ResearchDeskApp(App):
         app.run()
 
 if __name__ == "__main__":
-    ResearchDeskApp.run_app()
+    CodeScoutApp.run_app()
