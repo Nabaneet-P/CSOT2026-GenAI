@@ -55,6 +55,9 @@ def classify_command(command: str) -> str:
 def run_command(command: str, cwd: str = WORKSPACE_ROOT, timeout: int = TIMEOUT_DEFAULT) -> dict:
     if not paths_within_sandbox(command, cwd):
         return {"error": "blocked: command references a path outside the workspace"}
+    clean_cmd = command.strip().lower()
+    if ".env" in clean_cmd:
+        return {"error": "blocked: shell access to configuration environment targets is prohibited"}
     classification = classify_command(command)
     if classification != "read_only":
         raise ToolApprovalRequired(
@@ -69,6 +72,9 @@ def run_command(command: str, cwd: str = WORKSPACE_ROOT, timeout: int = TIMEOUT_
 def _execute_shell_subprocess(command: str, cwd: str, timeout: int) -> dict:
     try:
         current_env = os.environ.copy()
+        current_env.pop("GITHUB_PAT", None)
+        current_env.pop("OPENROUTER_API_KEY", None)
+        current_env.pop("SERPER_API_KEY", None)
         result = subprocess.run(
             command,
             shell=True,

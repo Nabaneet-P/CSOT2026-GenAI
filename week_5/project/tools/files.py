@@ -1,14 +1,3 @@
-"""
-Sandboxed file tools — see week_3/2_agent_class.md
-
-Implement:
-  - resolve_path
-  - read_file(path, start_line=1, read_lines=200)  — numbered lines, has_more
-  - write_file(path, content)
-  - edit_file(path, operation, start_line, end_line?, content?)  — replace | delete | append
-  - list_files(path, pattern)
-"""
-
 import os
 import json
 import fnmatch
@@ -29,6 +18,9 @@ def resolve_path(path: str) -> str:
     full = Path(base, path).resolve()
     if not full.is_relative_to(base):
         raise ValueError(f"Path escapes workspace: {path}")
+    normalized_path = full.name.lower()
+    if normalized_path.startswith(".env") or ".env" in full.parts:
+        raise PermissionError("Access Denied: High-privilege environment files are strictly isolated.")
     return str(full)
 
 def read_file(path: str, start_line: int = 1, read_lines: int = 200) -> dict:
