@@ -100,6 +100,16 @@ class CodeScoutApp(App):
         display_session = self.agent.session_id if self.agent.session_id else "Default"
         chat_log.write(f"[bold green]Welcome to CodeScout[/bold green] [bold red][Session: {display_session}][/bold red]")
 
+    async def on_unmount(self) -> None:
+        if self.agent and self.agent.mcp_manager:
+            try:
+                await self.agent.mcp_manager.close()
+            except RuntimeError as e:
+                if "cancel scope" in str(e):
+                    pass
+                else:
+                    raise e
+
     def handle_agent_events(self, event_type: str, data: Dict[str, Any]) -> None:
         tool_log = self.query_one("#tool-log", RichLog)
         if event_type == "tool_call":
@@ -162,12 +172,38 @@ class CodeScoutApp(App):
         input_widget.value = ""
         chat_log.write(f"\n[bold cyan][You][/bold cyan] {user_message}")
         input_widget.disabled = True
-        self.run_worker(self.process_agent_chat(user_message, chat_log, input_widget), thread=True)
+        
+        if user_message.startswith("/mcp"):
+            parts = user_message.split()
+            cmd = parts[1] if len(parts) > 1 else ""
+            if cmd == "list":
+                chat_log.write("\n[bold yellow]Configured MCP Servers:[/bold yellow]")
+                for name in self.agent.mcp_config.keys():
+                    status = "CONNECTED" if name in self.agent.mcp_manager.active_sessions else "DISCONNECTED"
+                    chat_log.write(f" - {name}: [{status}]")
+            elif cmd == "enable" and len(parts) > 2:
+                srv_name = parts[2]
+                if srv_name in self.agent.mcp_config:
+                    res = await self.agent.mcp_manager.connect_server(srv_name, self.agent.mcp_config[srv_name])
+                    chat_log.write(f"\n[green]{res}[/green]")
+                else:
+                    chat_log.write(f"\n[red]Server '{srv_name}' not found in config.json.[/red]")
+            elif cmd == "disable" and len(parts) > 2:
+                srv_name = parts[2]
+                res = await self.agent.mcp_manager.disconnect_server(srv_name)
+                chat_log.write(f"\n[yellow]{res}[/yellow]")
+            else:
+                chat_log.write("\nUnknown command. Usage: /mcp [list | enable <name> | disable <name>]")
+            
+            input_widget.disabled = False
+            input_widget.focus()
+            return
+        self.run_worker(self.process_agent_chat(user_message, chat_log, input_widget), thread=False)
 
     async def process_agent_chat(self, message: str, chat_log: RichLog, input_widget: Input) -> None:
         try:
             if self.agent:
-                answer = self.agent.chat(message)
+                answer = await self.agent.chat(message)
                 chat_log.write(f"[bold blue][CodeScout][/bold blue] {answer}")
         except Exception as e:
             chat_log.write(f"[bold red]Error Processing Request:[/bold red] {str(e)}")

@@ -4,12 +4,17 @@ import sys
 import uuid
 import json
 import time
+import asyncio
 import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Any, List
+from contextlib import AsyncExitStack
+
 from openai import OpenAI
 from dotenv import load_dotenv
+
+from mcp import ClientSession
 
 from tools import run_command, add_todos, get_todos, mark_todo, TOOL_REGISTRY, TOOLS, ToolApprovalRequired
 
@@ -29,6 +34,7 @@ MAX_ITERATIONS = 40
 STORAGE_DIR = Path(BASE_DIR) / ".agent"
 SESSIONS_DIR = STORAGE_DIR / "sessions"
 AGENTS_PATHS = (Path(BASE_DIR) / "AGENTS.md", STORAGE_DIR / "AGENTS.md")
+CONFIG_PATH = Path(BASE_DIR) / "config.json"
 
 BASE_PROMPT = """You are CodeScout, an advanced, adaptive AI system architecture operating across Windows and Linux development hosts. You possess specialized workspace execution skills that you can dynamically load on demand.
 
@@ -43,6 +49,81 @@ DYNAMIC ROLE & TASK ACTIVATION:
 3. If the user prompt is a simple conversational message, factual greeting, or casual chat requiring no deep workspace actions, reply directly in plaintext without loading a skill.
 """
 
+def load_mcp_config(path=CONFIG_PATH):
+    if not Path(path).exists():
+        return {}
+    raw = open(path, encoding="utf-8").read()
+    def substitute(match):
+        var = match.group(1)
+        value = os.environ.get(var)
+        if value is None:
+            raise RuntimeError(f"config.json references ${{{var}}}, but it isn't set in your .env")
+        return value
+    resolved = re.sub(r"\$\{([A-Z0-9_]+)\}", substitute, raw)
+    try:
+        return json.loads(resolved).get("mcpServers", {})
+    except Exception:
+        return {}
+
+class MCPManager:
+    def __init__(self):
+        self.stack = AsyncExitStack()
+        self.active_sessions = {}       
+        self.mcp_openai_tools = {}      
+        self.tool_to_session = {}       
+
+    async def connect_server(self, name: str, cfg: dict):
+        import httpx
+        from mcp.client.streamable_http import streamable_http_client
+        if name in self.active_sessions:
+            return f"Server '{name}' is already connected."
+        try:
+            custom_headers = cfg.get("headers", {})
+            http_client = await self.stack.enter_async_context(
+                httpx.AsyncClient(headers=custom_headers)
+            )
+            read, write, _ = await self.stack.enter_async_context(
+                streamable_http_client(
+                    url=cfg["url"], 
+                    http_client=http_client
+                )
+            )
+            session = await self.stack.enter_async_context(ClientSession(read, write))
+            await session.initialize()
+            self.active_sessions[name] = session
+            self.mcp_openai_tools[name] = []
+            tools_list = await session.list_tools()
+            for tool in tools_list.tools:
+                self.tool_to_session[tool.name] = session
+                self.mcp_openai_tools[name].append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.inputSchema,
+                    },
+                })
+            return f"Connected '{name}': {len(tools_list.tools)} tools loaded."
+        except Exception as e:
+            return f"Failed to connect to '{name}': {str(e)}"
+
+    async def disconnect_server(self, name: str):
+        if name not in self.active_sessions:
+            return f"Server '{name}' is not currently active."
+        tools_to_remove = [tname for tname, sess in self.tool_to_session.items() if sess == self.active_sessions[name]]
+        for tname in tools_to_remove:
+            del self.tool_to_session[tname]
+        del self.active_sessions[name]
+        del self.mcp_openai_tools[name]
+        return f"Disconnected server '{name}' and cleared its tools."
+
+    async def call_tool(self, name: str, args: dict) -> str:
+        result = await self.tool_to_session[name].call_tool(name, args)
+        return result.content[0].text if result.content else ""
+
+    async def close(self):
+        await self.stack.aclose()
+
 class Agent:
     def __init__(self, workspace: str = ".", session_id: str | None = None, callback: Callable[[str, Dict[str, Any]], None] = None):
         self.workspace = os.path.abspath(workspace)
@@ -51,6 +132,8 @@ class Agent:
         self.file_path = None
         self.session_id = session_id
         self.callback = callback or self._default_callback
+        self.mcp_manager = MCPManager()
+        self.mcp_config = load_mcp_config()
         
         SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
         system_prompt = self._build_system_prompt()
@@ -130,34 +213,37 @@ class Agent:
         with open(self.file_path, "w", encoding="utf-8") as f:
             json.dump(self.json_data, f, indent=4)
 
-    def chat(self, user_message: str) -> str:
+    async def chat(self, user_message: str) -> str:
         self.messages.append({"role": "user", "content": user_message})
-        answer = self._run_loop()
+        answer = await self._run_loop()
         self._save_session()
         return answer
 
-    def _run_loop(self) -> str:
+    async def _run_loop(self) -> str:
         for iteration in range(MAX_ITERATIONS):
             current_todos = get_todos()
             if current_todos and len(current_todos) > 0 and all(t["status"] == "completed" for t in current_todos):
                 return f"Task completed successfully! All items resolved in {iteration} steps."
 
             self._emit("agent_thinking", iteration=iteration)
-            
+            combined_tools = list(TOOLS) if TOOLS else []
+            for server_tools in self.mcp_manager.mcp_openai_tools.values():
+                combined_tools.extend(server_tools)
+
             try:
                 response = client.chat.completions.create(
                     model=MODEL,
                     messages=self.messages,
-                    tools=TOOLS if TOOLS else None,
+                    tools=combined_tools if combined_tools else None,
                 )
             except Exception as e:
                 self._emit("error", message=f"API Connection Error: {str(e)}")
-                time.sleep(2)
+                await asyncio.sleep(2)
                 continue
 
             if not response or not response.choices:
                 self._emit("error", message="Empty payload returned from API.")
-                time.sleep(2)
+                await asyncio.sleep(2)
                 continue
 
             choice = response.choices[0]
@@ -185,7 +271,7 @@ class Agent:
                 for tool_call in message.tool_calls:
                     self._emit("tool_call", name=tool_call.function.name, arguments=tool_call.function.arguments)
                     try:
-                        result = self.dispatch(tool_call)
+                        result = await self.dispatch(tool_call)
                     except ToolApprovalRequired as approval_event:
                         result = json.dumps(self._handle_ui_approval(approval_event))
                     self._emit("tool_result", name=tool_call.function.name, result=result)
@@ -225,13 +311,18 @@ class Agent:
             "error": "User denied execution"
         }
     
-    def dispatch(self, tool_call) -> str:
+    async def dispatch(self, tool_call) -> str:
         name = tool_call.function.name
         try:
             args = json.loads(tool_call.function.arguments)
         except Exception:
             return json.dumps({"success": False, "error": "Invalid JSON arguments layout parsing error."})
 
+        if name in self.mcp_manager.tool_to_session:
+            try:
+                return await self.mcp_manager.call_tool(name, args)
+            except Exception as e:
+                return json.dumps({"success": False, "error": f"MCP execution error: {str(e)}"})
         if name not in TOOL_REGISTRY:
             return json.dumps({"success": False, "error": f"Tool '{name}' is not registered."})
         
@@ -241,7 +332,8 @@ class Agent:
             raise
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
-        
+
+
 class REPLAgent:
     def __init__(self, session_id: str | None = None):
         self.agent = Agent(session_id=session_id, callback=self.handle_agent_events)
@@ -254,7 +346,7 @@ class REPLAgent:
         elif event_type == "error":
             print(f"\n  [Error]: {data['message']}", file=sys.stderr)
 
-    def run(self):
+    async def run(self):
         print(f"CodeScout Engine [{self.agent.session_id}] Active — Enter /quit or /exit to exit.")
         while True:
             try:
@@ -263,8 +355,34 @@ class REPLAgent:
                 break
             if not user_input or user_input in ("/quit", "/exit"):
                 break
-            response = self.agent.chat(user_input)
+            if user_input.startswith("/mcp"):
+                parts = user_input.split()
+                cmd = parts[1] if len(parts) > 1 else ""
+                if cmd == "list":
+                    print("\n Configured MCP Servers ")
+                    for name in self.agent.mcp_config.keys():
+                        status = "CONNECTED" if name in self.agent.mcp_manager.active_sessions else "DISCONNECTED"
+                        print(f" - {name}: [{status}]")
+                    continue
+                elif cmd == "enable" and len(parts) > 2:
+                    srv_name = parts[2]
+                    if srv_name in self.agent.mcp_config:
+                        res = await self.agent.mcp_manager.connect_server(srv_name, self.agent.mcp_config[srv_name])
+                        print(f"\n{res}")
+                    else:
+                        print(f"\nServer '{srv_name}' not found in config.json.")
+                    continue
+                elif cmd == "disable" and len(parts) > 2:
+                    srv_name = parts[2]
+                    res = await self.agent.mcp_manager.disconnect_server(srv_name)
+                    print(f"\n{res}")
+                    continue
+                else:
+                    print("\nUnknown command. Usage: /mcp [list | enable <name> | disable <name>]")
+                    continue
+            response = await self.agent.chat(user_input)
             print(f"\n{response}")
+        await self.agent.mcp_manager.close()
 
 def main():
     parser = argparse.ArgumentParser(
@@ -282,11 +400,15 @@ def main():
     
     if args.command:
         agent = Agent(session_id=args.session)
-        agent._run_loop(args.command)
+        async def run_single():
+            res = await agent.chat(args.command)
+            print(f"\n{res}")
+            await agent.mcp_manager.close()
+        asyncio.run(run_single())
         return
 
     agent = REPLAgent(session_id=args.session)
-    agent.run()
+    asyncio.run(agent.run())
     
 if __name__ == "__main__":
     main()
